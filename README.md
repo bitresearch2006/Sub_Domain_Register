@@ -15,32 +15,14 @@ The design follows a **multi-user isolation model**, where each tunnel runs as a
 * Automatic tunnel reconnect
 * Multi-user support (one tunnel per Linux user)
 * systemd-managed lifecycle
+* Strict localhost binding on remote side
 * No manual daemon handling
 
 Each user can expose a local service as:
 
 ```
-https://bitone.in/<username>
+https://<username>.bitone.in
 ```
-
----
-
-## Files Included
-
-| File | Purpose |
-|------|--------|
-| `faas_register_tunnel.sh` | Main client script |
-| `faas_register_tunnel@.service` | systemd template unit |
-| `install.sh` | Interactive installer |
-| `uninstall.sh` | Per-user uninstaller |
-
-Installed paths:
-
-| Path | Purpose |
-|------|--------|
-| `/usr/local/sbin/faas_register_tunnel.sh` | Runtime client |
-| `/etc/systemd/system/faas_register_tunnel@.service` | Service template |
-| `/etc/faas_register_tunnel/<USER>.env` | Per-user config |
 
 ---
 
@@ -48,7 +30,12 @@ Installed paths:
 
 ### 1. Token Provisioning
 
-Administrator provides a **TOKEN** for the user.
+Administrator provides a **TOKEN** mapped to:
+
+* Logical user name (subdomain)
+* Allowed SSH principals
+* Assigned remote port
+* Maximum certificate TTL
 
 ---
 
@@ -65,7 +52,14 @@ To:
 https://bitone.in/sign-cert
 ```
 
-Server returns a signed SSH certificate.
+Server validates:
+
+* Token exists
+* Token is active
+* Token has assigned port
+* Token has non-empty name
+
+Server returns a signed SSH certificate limited to allowed principals.
 
 ---
 
@@ -95,6 +89,8 @@ Using:
 ssh -N -R 127.0.0.1:9004:localhost:8080 principal@bitone.in
 ```
 
+Remote port is always bound to `127.0.0.1` for safety.
+
 ---
 
 ### 5. Public Routing
@@ -102,7 +98,7 @@ ssh -N -R 127.0.0.1:9004:localhost:8080 principal@bitone.in
 VM maps:
 
 ```
-https://bitone.in/alice → 127.0.0.1:9004
+https://<username>.bitone.in → 127.0.0.1:<assigned_port>
 ```
 
 ---
@@ -117,11 +113,20 @@ The client:
 
 ---
 
+## Certificate Lifecycle
+
+* Certificates are short-lived.
+* `max_cert_ttl` is enforced by server.
+* Client renews certificate before `RENEW_BEFORE` seconds remain.
+* If renewal fails, retry logic continues.
+
+Token validity is enforced server-side.
+
+---
+
 ## Installation
 
 ### Step 1 – Prepare Files
-
-Place all files in a directory:
 
 ```
 faas-client/
@@ -148,7 +153,7 @@ Prompts:
 * LOCAL_PORT
 * TOKEN
 
-If user does not exist, installer offers to create it.
+If user does not exist, installer can create a dedicated system user.
 
 Installer performs:
 
@@ -225,22 +230,6 @@ sudo ssh-keygen -Lf /home/alice/.ssh/bitone_key-cert.pub
 
 ---
 
-## Accessing the Service
-
-Public URL:
-
-```
-https://bitone.in/alice
-```
-
-Maps to:
-
-```
-alice:localhost:8080
-```
-
----
-
 ## Security Model
 
 * Tokens are secret
@@ -248,6 +237,7 @@ alice:localhost:8080
 * One Linux user per tunnel
 * Only specified port is exposed
 * Reverse tunnel bound to localhost
+* No direct public SSH port exposure
 
 ---
 
@@ -268,20 +258,7 @@ Common causes:
 
 ---
 
-### Tunnel Works but No Access
-
-On VM, admin should verify:
-
-* User exists
-* Port mapping
-* Nginx routing
-* Token still active
-
----
-
 ## Uninstall
-
-Remove one tunnel:
 
 ```bash
 sudo bash uninstall.sh
@@ -293,7 +270,6 @@ Actions:
 * Disables systemd unit
 * Removes env file
 * Optionally removes user
-* Optionally removes shared files
 
 ---
 
@@ -307,4 +283,3 @@ This client provides:
 * Automatic recovery
 
 Designed for large-scale WSL and Linux tunnel clients with strict operational safety.
-
